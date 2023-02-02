@@ -95,3 +95,113 @@ static void handle_signalrm(int sig){
     if(sigprocmask(SIG_UNBLOCK, &signal_set, NULL) < 0){die("sigprocmask");}
 }
 
+/* Sammelt alle beendeten Kindprozesse auf und stellt sicher, dass
+die zugehörigen struct contact Objekte wiederverwendet werden können. */
+static void handle_sigchld(int sig){
+    // save errno
+    int save_errno = errno;
+
+
+    struct contact_t *current_PID;
+    // go over killed list
+    pid_t pid;
+    while((pid = waitpid(-1, NULL, WNOHANG)) > 0){
+
+        // current_PID contains the zombie process
+        current_PID = list_remove(&killed, pid);
+        if(!current_PID){
+            continue;
+        }
+
+        // enque in unused
+        list_enqueue(&unused, current_PID);
+    }
+
+    errno = save_errno;
+}
+
+/*  Sollten noch nicht alle erlaubten Verbindungen
+belegt sein, wird der nächste Eintrag aus der Liste unused zurückgegeben. Andernfalls wird
+passiv gewartet bis eine neue Verbindung erlaubt ist. */
+static struct contact *wait_for_slot(void){
+    
+    // block SIGCHLD while waiting
+    sigset_t old, new;
+    if(sigemptyset(&new) < 0){die("sigemptyset");}
+    if(sigaddset(&new, SIGCHLD) < 0){die("sigaddset");}
+    if(sigprocmask(SIG_BLOCK, &new, WNOHANG) < 0){die("sigprocmask");}
+
+    struct contact_t *current;
+    while(!(current = list_peek(&unused))){
+        sigsuspend(&old);
+    }
+
+    if(sigprocmask(SIG_UNBLOCK, &new, WNOHANG) < 0){die("sigprocmask");}
+    return current; 
+}
+
+static void server_loop(int ls){
+    struct contact *slot = NULL;
+    int valid = 0;
+
+
+    for(;;){
+        // Wait for connections 
+        if(!valid){
+            slot = wait_for_slot();
+            valid = 1;
+        }
+
+
+        int clientSock = accept(ls, NULL, NULL);
+        
+        // no die as we want server to go on
+        if(clientSock < 0){
+            perror("accept");
+            continue;
+        }
+
+        pid_t pid = fork();
+        if(pid < 0){
+            perror("fork");
+            continue;
+        }
+        // child
+        else if(!pid){
+            close(ls);
+        }
+        // parent
+        else{
+
+        }
+
+
+        // ????
+    }
+
+}
+
+static int main(void){
+    // globale Daten initialisieren
+    list_init(&running);
+    list_init(&killed);
+    list_init(&unused);
+
+    // allocate memory for contacts
+    for(int i = 0; i < MAX_CONTACTS; i++){
+        struct contact_t *contact = malloc(sizeof(contact_t));
+        if(!contact){die("malloc");}
+        list_enqueue(&unused, contact);
+    }
+
+    // behandlung von signalen aufsetzen
+    struct sigaction alarmaction = {
+        .sa_handler = handle_signalrm,
+        .sa_flag = SA_RESTART,
+    };
+
+    sigemptyset(&alarmaction.sa_mask);
+
+    
+}
+
