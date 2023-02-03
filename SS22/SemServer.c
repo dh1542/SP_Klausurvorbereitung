@@ -85,6 +85,15 @@ int main(int argc, char *argv){
     // listen
     if(listen(ls, SOMAXCONN) < 0){die("listen");}
 
+    // ignore sigpip
+    struct sigaction action = {
+        .sa_handler = SIG_IGN;
+    }
+
+    if(sigemptyset(&action.sa_flags) < 0){die("sigemptyset");}
+    if(sigaction(SIGPIPE, &action, NULL) < 0){die("sigaction");}
+
+
 
     // wait for connections and accept them
     // create client for each 
@@ -101,9 +110,6 @@ int main(int argc, char *argv){
 
         
     }
-
-
-    
 
 
 }
