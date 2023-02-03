@@ -113,3 +113,29 @@ int main(int argc, char *argv){
 
 
 }
+
+/* Startet fn mit arg als Argument in
+einem neuen Faden, dessen Ressourcen automatisch bei dessen Beendigung freigegeben wer-
+den. Im Fehlerfall wird errno auf einen passend Wert gesetzt und -1 statt 0 zurückgegeben. */
+int workerStart(void *(*fn)(void *), void *arg){
+    // create new thread -> pthread create, detach
+    pthread_t thread;
+
+    // set errno
+    errno = pthread_create(&thread, NULL, fn, arg);
+    
+    // if errno was set, return -1
+    if(errno){
+        return -1;
+    }
+
+    errno = pthread_detach(thread);
+    if(errno){
+        return -1;
+    }
+
+    return 0;
+}
+
+
+
