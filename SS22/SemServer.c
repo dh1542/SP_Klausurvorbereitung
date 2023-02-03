@@ -147,23 +147,25 @@ struct client *clientCreate(int fd){
     // create client struct
     struct client client = malloc(sizeof(*client));
     if(client == NULL){
-        perror("malloc");
+        close(fd);
         return NULL;
     }
 
     // SEM Struct
     struct SEM SEM = semCreate(0);
     if(SEM == NULL){
-        perror("semCreate");
+        close(fd);
+        free(client)l=;
         return NULL;
     }
 
     client -> requests = SEM;
 
     // file descriptors
-    client -> rx = fdopen(fd);
+    client -> rx = fdopen(fd, "r");
     if(client -> rx == NULL){
-        perror("fdopen");
+        close(fd);
+        free(client);
         return NULL;
     }
 
@@ -171,13 +173,18 @@ struct client *clientCreate(int fd){
     int fd2 = dup(fd);
     if(fd2 == -1){
         fclose(client -> rx);
+        close(fd2);
+        close(fd);
+        free(client);
         return NULL;
     }
-
-    client -> rx = fdopen(fd2);
+    
+    client -> rx = fdopen(fd2, "w");
     if(client -> rx == NULL){
         fclose(client -> rx);
+        close(fd);
         close(fd2);
+        free(client);
         return NULL;
     }
 
