@@ -190,15 +190,181 @@ struct client *clientCreate(int fd){
 
     return client;
 
-
-    
-
-    
-
-
-
-
 }
+
+/* Liest Zeilen mit Arbeitsaufträgen von der in arg als
+struct client übergebenen Verbindung ein und startet Fäden zu deren Bearbeitung.
+Zeilen mit mehr als 20 (MAX_LINE_LEN) Zeichen werden ohne Meldung verworfen. Für
+alle anderen wird eine struct request erzeugt un in einem neuen Faden durch die
+Funktion handleRequest() bearbeitet. Treten dabei Fehler auf, wird der Fehlergrund
+(errno) mit der Funktion reply() an den Clienten geschickt (strerror(3)). Wurden alle
+Zeilen eingelesen, muss mit dem Aufräumen der struct client gewartet werden, bis alle
+Anfragen bearbeitet wurden, wozu der Semaphor requests in der Struktur vorgesehen ist. */
+void *clientProcess(void *arg){
+
+    // read with fgets()
+    struct client *client = arg;
+
+    // buffer (+2 bc \n \0)
+    char buffer[MAX_LINE_LEN + 2];
+
+    // counter for requests
+    size_t request_counter = 0;
+
+    while(fgets(buffer, sizeof(buffer), client -> rx)){
+        size_t len = sizeof(buffer);
+
+        // line length
+        if(len > MAX_LINE_LEN && buffer[len - 1] != '\n'){
+            // zeile zu lang, muss aber ausgelesen werden
+            // mit fgetc, da wir nicht wissen wielange es noch geht
+            while(fgetc(client -> rx) != EOF){
+                if(c == '\n') break;
+            }
+
+            // check errors of stream with ferror
+            if(ferror(client -> rx) != 0){
+                reply(client -> tx, buffer, "%s", strerror(errno));
+            }
+            continue;
+        }
+        
+        // length is ok, we can continue
+        struct request *request = malloc(sizeof(*request));
+        if(request == NULL){
+            reply(client -> tx, buffer, "%s", strerror(errno));
+            continue;
+        }
+
+        // copy string to request struct
+        buffer[len - 1] = '\0';
+        strcpy(request -> line, buffer);
+        request -> client = client;
+        
+        // start worker
+        if(workerStart(handleRequest, request) < 0){
+            reply(client -> tx, buffer, "%s", strerror(errno));
+            free(request);
+            continue;
+        }
+        else{
+            request_counter++;
+        }
+    }
+
+    while(request_counter > 0){
+        P(client -> requests);
+        requests--;
+    }
+    // destroy client
+    clientDestroy(client);
+    return NULL;
+}
+
+
+/* Gibt die Ressourcen von client frei. */
+void clientDestroy(struct client *client){
+    // call sem destroy
+    semDestroy(client -> SEM);
+    
+    // close file streams
+    fclose(client -> rx);
+    fclose(client -> tx);
+
+    // free memory
+    free(client);
+}
+
+/* Bearbeitet das als arg übergebene struct request-
+Objekt. Abhängig vom ersten Zeichen in line wird handleI() oder handlePV() aus-
+geführt. Geben diese einen Wert ungleich 0 zurück, wird der Fehlergrund (errno) als
+Antwort verwendet. Andernfalls haben die Funktion selbst bereits eine Antwort geschickt.
+Auf ungültige Operationen wird mit "unknown operation" geantwortet (reply()).*/
+void *handleRequest(void *arg){
+    // request struct
+    struct request *request = arg;
+    
+    int number = 0;
+    // get first char in line
+    char c = (request -> line)[0];
+
+    if(c == 'P'){
+        number = handlePV(request)
+    }
+    else if(c == 'I'){
+        number = handleI(request);
+    }
+    else if(c == 'V'){
+        handlePV(request)
+
+    }
+    else{
+        // error -> reply
+        reply(request -> client -> tx, request -> line, "unknown_operation");
+    }
+
+    if(numer != 0){
+        reply(request -> client -> tx, request -> line, "%s", strerror(errno));
+    }
+
+    V(request -> client -> requests);
+    free(request);
+    return NULL;
+}
+
+/*  Initialisiert einen neuen Semaphor mit dem
+in der Anfragezeile angegebenen Initialwert (parseNumber()). Im Erfolgsfall wird die
+Speicherdresse des Semaphors in die Liste der gültigen Semaphore eingetragen (listAdd())
+und mit reply() als Antwort geschickt.*/
+int handleI(const struct request *rq){
+
+    int val;
+
+    // intial value of sem 
+    if(parseNumber(rq -> line[1], &val) != 0){
+        return -1;
+    }
+
+    // create SEM
+    SEM *sem = semCreate(val);
+    if(sem == NULL){
+        return -1;
+    }
+
+    if(listAppend(&semaphore, sem) != 0){
+        semDestroy(sem);
+        return -1;
+    }
+
+    reply(rq -> client -> tx, rq -> line, "%p", sem);
+    return 0;
+}
+
+/*  Prüft, ob die in der
+Anfragezeile gegebene Adresse (parsePointer()) gültig ist (listContains()) und
+führt die Funktion fn darauf aus. Für ungültige Adressen wird errno=ENOENT gesetzt und
+-1 zurückgegeben, andernfalls "success" als Antwort (reply()) gesendet.*/
+int handlePV(const struct request *rq, void (*fn)(SEM *)){
+    void *addr;
+    if(parsePointer(rq -> line[1], &addr) != 0){
+        return -1;
+    }
+
+    if(!(listContains(&Semaphors, addr))){
+        errno = ENOENT;
+        return -1;
+    }
+
+    fn(addr);
+    reply(rq -> client -> tx, rq -> line, "success");
+    return 0;
+}
+
+
+
+
+
+
 
 
 
